@@ -1,0 +1,240 @@
+import os
+import subprocess
+import time
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+)
+import psutil
+from design_configs import make_design_configs
+
+# Number of CPU cores you want to assign to the simulation
+cores_per_sim = 40  # <-- You can change this
+
+def get_idle_cpus(threshold=0.7):
+    """Return a list of idle core indices (as strings)."""
+    usage = psutil.cpu_percent(interval=1, percpu=True)
+    return [str(i) for i, u in enumerate(usage) if u < threshold * 100]
+
+# Function to run a single simulation with retries and logging
+def run_simulation(command, log_file, cpu_range=None, retries=1, delay=30, cwd=None):
+    if cpu_range:
+        command = f"taskset -c {cpu_range} {command}"
+    for attempt in range(retries):
+        with open(log_file, "w") as log:
+            result = subprocess.run(
+                command, shell=True, stdout=log, stderr=log, cwd=cwd
+            )
+        if result.returncode == 0:
+            return result  # Success
+        else:
+            print(f"Command failed (attempt {attempt + 1}): {command}")
+            time.sleep(delay)  # Small delay before retrying
+    return result  # Return the final attempt's result
+
+
+benchmarks = [
+    # "500.perlbench_r",
+    # "502.gcc_r",
+    # "503.bwaves_r",
+    # "505.mcf_r",
+    # "507.cactuBSSN_r",
+    # "508.namd_r",
+    # "510.parest_r",
+    # "511.povray_r",
+    # "519.lbm_r",
+    # "520.omnetpp_r",
+    # "521.wrf_r",
+    # "523.xalancbmk_r",
+    # "525.x264_r",
+    # "526.blender_r",
+    # "527.cam4_r",
+    # "531.deepsjeng_r",
+    # "538.imagick_r",
+    # "541.leela_r",
+    # "544.nab_r",
+    # "548.exchange2_r",
+    # "549.fotonik3d_r",
+    # "554.roms_r",
+    # "557.xz_r",
+    "600.perlbench_s", #failed
+    "602.gcc_s", #failed
+    "603.bwaves_s",
+    "605.mcf_s",
+    "607.cactuBSSN_s",
+    "619.lbm_s",
+    "620.omnetpp_s",
+    "621.wrf_s",
+    "623.xalancbmk_s",
+    "625.x264_s",
+    "627.cam4_s",
+    "628.pop2_s",
+    "631.deepsjeng_s",
+    "638.imagick_s",
+    "641.leela_s",
+    "644.nab_s",
+    "648.exchange2_s",
+    "649.fotonik3d_s",
+    "654.roms_s",
+    "657.xz_s",
+    "996.specrand_fs",
+    # "997.specrand_fr",
+    "998.specrand_is",
+    # "999.specrand_ir",
+]
+
+
+# Define detailed cache configurations for each design and level
+
+
+# Base directory for simulation output
+final_stat_dir = "Stat_l2_300M"
+base_output_dir = f"/home/binu/Gem5/gem5_v23.1_copy/gem5_v23.1/Spec_2017/m5out/{final_stat_dir}"
+
+l2_assoc = 8
+
+design_configs = make_design_configs([
+                                    # 'CSM', 'ATOR', 'ATOR_1P', 'ATOR_2P', "ATOR_3P", "ATOR_4P"
+                                      "CSM_Par","ATOR_Par",
+                                      ],l2_assoc)
+
+
+# Command template for running gem5 with specific configurations
+command_template = (
+    "/home/binu/Gem5/gem5_v23.1_copy/gem5_v23.1/build/X86/gem5.opt --stats-file={stats_file} --outdir={outdir} "
+    #"--debug-flags=Packet --debug-file={trace_file} "
+    "/home/binu/Gem5/gem5_v23.1_copy/gem5_v23.1/configs/spec2017/se_spec2017.py --benchmark={benchmark} --benchmark_stdout='{benchmark}.out' --benchmark_stderr='{benchmark}.err'  "
+    "--cpu-type=O3CPU --l1d_size=32kB --l2_size=1MB --caches --l2cache "
+    # " --l3cache --l3_size=16MB"
+    "--l1i_size=32kB --l1i_assoc=2 --l1i_tag_latency=2 --l1i_data_latency=2 --l1i_wd_latencies 2 2 --l1i_rd_latencies 2 2 --l1i_wt_latencies 2 2 --l1i_rt_latencies 2 2 "
+    "--l1d_assoc=2 --l1d_tag_latency={l1d_tag_latency} --l1d_data_latency={l1d_data_latency} " 
+    "--l1d_wd_latencies {l1d_wd_latencies} --l1d_rd_latencies {l1d_rd_latencies} --l1d_wt_latencies {l1d_wt_latencies} --l1d_rt_latencies {l1d_rt_latencies} "
+    
+    
+    
+    "--l2_assoc={l2_assoc} --l2_sequential_access=False "
+    # "--l2_numVictimWays=1 "
+    "--l2_tag_latency={l2_tag_latency} --l2_data_latency={l2_data_latency} "
+    "--l2_wd_latencies {l2_wd_latencies} --l2_rd_latencies {l2_rd_latencies} --l2_wt_latencies {l2_wt_latencies} --l2_rt_latencies {l2_rt_latencies} "
+    # "--l3_assoc=8 --l3_tag_latency={l3_tag_latency} --l3_data_latency={l3_data_latency} "
+    # "--l3_wd_latencies {l3_wd_latencies} --l3_rd_latencies {l3_rd_latencies} --l3_wt_latencies {l3_wt_latencies} --l3_rt_latencies {l3_rt_latencies} "
+    # "--standard-switch=500 --warmup-insts=5000 --maxinsts=2000000"
+    "--standard-switch=10000000 --warmup-insts=10000000 --maxinsts=300000000"
+)
+
+# Create a list to store all commands
+commands = []
+failed_commands = []
+
+# Loop through benchmarks, designs, and cache levels
+for benchmark in benchmarks:
+    # disk_image = benchmark_paths[benchmark]
+    # benchmark_input = benchmark_inputs[benchmark]
+    benchmark_name = benchmark.split('.', 1)[1]
+    rundir =''
+    suffix= benchmark[-1]
+    if suffix == "r":
+        # rate
+        rundir = f"/home/binu/Gem5/gem5_v23.1_copy/gem5_v23.1/configs/spec2017/benchspec/CPU/{benchmark}/run/run_base_refrate_Aug26-m64.0000"
+    elif suffix == "s":
+        # speed
+        rundir = f"/home/binu/Gem5/gem5_v23.1_copy/gem5_v23.1/configs/spec2017/benchspec/CPU/{benchmark}/run/run_base_refspeed_Aug26-m64.0000"
+
+    # For each design, vary each cache level while the other two are fixed as SLC
+    for design, config in design_configs.items():
+            # Get the config for each level according to the design; otherwise, fallback to 'slc' config
+        l1d_config = (
+            config["l1d"]
+        )
+     
+        l2_config = (
+            config["l2"]
+        )
+
+        # Generate unique output directories and file names
+        outdir = os.path.join(
+            base_output_dir, f"{benchmark_name}_{design}"
+        )
+        os.makedirs(outdir, exist_ok=True)
+        stats_file = f"stats_{l2_assoc}.txt"
+        trace_file = f"trace_{l2_assoc}.out"
+
+        # Create the command with level-specific configurations
+        command = command_template.format(
+            outdir=outdir,
+            stats_file=stats_file,
+            trace_file=trace_file,
+            benchmark=benchmark_name,
+            l2_assoc= l2_assoc,
+            l1d_tag_latency=l1d_config["tag_latency"],
+            l1d_data_latency=l1d_config["data_latency"],
+            l1d_wd_latencies=" ".join(
+                map(str, l1d_config["wd_latencies"])
+            ),
+            l1d_rd_latencies=" ".join(
+                map(str, l1d_config["rd_latencies"])
+            ),
+            l1d_rt_latencies=" ".join(
+                map(str, l1d_config["rt_latencies"])
+            ),
+            l1d_wt_latencies=" ".join(
+                map(str, l1d_config["wt_latencies"])
+            ),
+            l2_tag_latency=l2_config["tag_latency"],
+            l2_data_latency=l2_config["data_latency"],
+            l2_wd_latencies=" ".join(
+                map(str, l2_config["wd_latencies"])
+            ),
+            l2_rd_latencies=" ".join(
+                map(str, l2_config["rd_latencies"])
+            ),
+            l2_wt_latencies=" ".join(
+                map(str, l2_config["wt_latencies"])
+            ),
+            l2_rt_latencies=" ".join(
+                map(str, l2_config["rt_latencies"])
+            ),
+        )
+
+        # Add to command list
+        log_file = os.path.join(outdir, "run_log.txt")
+        commands.append((command, log_file, rundir))
+
+# Use ThreadPoolExecutor to manage parallel simulations
+# Get idle cores and select only the number you need
+idle_cores = get_idle_cpus()
+print(idle_cores)
+if len(idle_cores) < cores_per_sim:
+    raise RuntimeError(f"Not enough idle cores. Requested {cores_per_sim}, but only found {len(idle_cores)}.")
+
+assigned_cores = ",".join(idle_cores[:cores_per_sim])
+print(assigned_cores)
+max_workers = cores_per_sim
+with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    future_to_command = {
+        executor.submit(run_simulation, cmd, log_file, cpu_range=assigned_cores,cwd=rundir): (cmd, log_file, rundir)
+        for cmd, log_file, rundir in commands
+    }
+
+    for future in as_completed(future_to_command):
+        cmd, log_file, rundir = future_to_command[future]
+        try:
+            result = future.result()
+            if result.returncode != 0:
+                print(f"Command failed: {cmd}. Check log: {log_file} benchmark run directory: {rundir}")
+                failed_commands.append((cmd, log_file))
+            else:
+                print(f"Command succeeded: {cmd}")
+        except Exception as exc:
+            print(
+                f"Command generated an exception: {cmd}, {exc}. Check log: {log_file}"
+            )
+            failed_commands.append((cmd, log_file))
+
+# Print summary of failed commands
+if failed_commands:
+    print("\nThe following commands failed after all retries:")
+    for cmd, log_file in failed_commands:
+        print(f"Failed Command: {cmd}, Log File: {log_file}")
+
+print("\nAll simulations completed.")
