@@ -10,7 +10,7 @@ Help files to set up SPEC 2017 benchmarks to run with Gem5 in SE mode
 
 3. Choose a config file appropriate to the ISA used in the Gem5 build. Here, I have used the linux_x86 config to generate benchmark exe files
 
-4. Set up binaries and run folders with 
+4. Set up binaries and run folders with  
 runcpu --config=linux_x86.cfg --action=validate --tune=base specspeed specrate
 
 5. Create setup files as given in the reference and customise
